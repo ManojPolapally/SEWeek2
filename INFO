@@ -691,3 +691,1257 @@ curl http://localhost:6060
 # ============================================================
 # END OF AWS CLOUD DEPLOYMENT PRACTICAL
 # ============================================================
+set-1
+
+# TASK 1: DOCKER - WORDPRESS + MYSQL
+# Run in PowerShell or a terminal with Docker installed.
+
+docker pull mysql:8.0
+docker pull wordpress:latest
+docker network create eticket-net
+docker volume create eticket-db-data
+
+docker run -d --name eticket-db --network eticket-net -e MYSQL_ROOT_PASSWORD=RootPass123 -e MYSQL_DATABASE=eticket -e MYSQL_USER=ticketuser -e MYSQL_PASSWORD=TicketPass123 -v eticket-db-data:/var/lib/mysql --restart unless-stopped mysql:8.0
+
+docker run -d --name eticket-web --network eticket-net -p 80:80 -e WORDPRESS_DB_HOST=eticket-db:3306 -e WORDPRESS_DB_USER=ticketuser -e WORDPRESS_DB_PASSWORD=TicketPass123 -e WORDPRESS_DB_NAME=eticket --restart unless-stopped wordpress:latest
+
+docker ps
+docker logs eticket-web
+docker exec eticket-web php -r 'echo gethostbyname("eticket-db");'
+# Browser: http://localhost
+
+# Demonstrate recovery and persistence
+docker exec eticket-db mysql -uticketuser -pTicketPass123 eticket -e "CREATE TABLE IF NOT EXISTS demo (id INT PRIMARY KEY); INSERT IGNORE INTO demo VALUES (1);"
+docker rm -f eticket-db
+# Recreate the DB container with the SAME run command above.
+docker exec eticket-db mysql -uticketuser -pTicketPass123 eticket -e "SELECT * FROM demo;"
+
+# TASK 2: JENKINS + MAVEN
+git clone https://github.com/ssvkotamraju/E-ticketing.git
+cd E-ticketing
+mvn clean test package
+# Jenkins: New Item > Freestyle
+# Source Code Management: Git > repository URL above
+# Build Triggers: Poll SCM = H/5 * * * *
+# Build Steps: Invoke top-level Maven targets
+# Goals: clean package
+# Post-build: Archive artifacts = **/target/*.war, **/target/*.jar
+# Build Now > Console Output
+# Introduce a test failure, commit and rebuild to demonstrate red status.
+
+# TASK 3: KUBERNETES
+minikube start
+# Save the deployment YAML below as ticket-k8s.yaml.
+kubectl apply -f ticket-k8s.yaml
+kubectl get deployments,pods,svc
+minikube service ticket-service --url
+kubectl scale deployment ticket-app --replicas=5
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl get pods -w
+kubectl set image deployment/ticket-app web=YOUR_DOCKERHUB_USER/eticket:v2
+kubectl rollout status deployment/ticket-app
+kubectl rollout undo deployment/ticket-app
+kubectl rollout history deployment/ticket-app
+
+# FILE: ticket-k8s.yaml
+# Save the following YAML separately.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticket-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ticket-app
+  template:
+    metadata:
+      labels:
+        app: ticket-app
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/eticket:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-service
+spec:
+  type: NodePort
+  selector:
+    app: ticket-app
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30081
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name ticket-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker ps
+docker logs ticket-nagios
+# Browser: http://localhost:8088/nagios
+# Add host and service definitions in Nagios configuration.
+# Use check_http, check_tcp, check_load and disk/memory plugins.
+# Verify configuration, reload Nagios, and observe alerts.
+# Stop the monitored service to demonstrate CRITICAL:
+docker stop eticket-web
+# Restart to demonstrate recovery:
+docker start eticket-web
+
+# TASK 5: AWS EC2
+# AWS Console: Launch Ubuntu EC2.
+# Security Group: SSH 22 from My IP, HTTP 80 from users.
+# Connect with your .pem key:
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+
+sudo apt update
+sudo apt install -y git docker.io openjdk-17-jdk maven
+sudo systemctl enable --now docker
+git clone https://github.com/ssvkotamraju/E-ticketing.git
+cd E-ticketing
+mvn clean package
+sudo docker pull YOUR_DOCKERHUB_USER/eticket:v1
+sudo docker run -d --name eticket-app -p 80:8080 --restart unless-stopped YOUR_DOCKERHUB_USER/eticket:v1
+sudo docker ps
+sudo docker logs eticket-app
+# Browser: http://EC2_PUBLIC_IP
+# The Docker Hub image must already contain the working application.
+
+
+
+set 2
+
+# TASK 1: DOCKER - HMS + MYSQL
+docker pull mysql:8.0
+docker pull tomcat:9.0
+docker network create hms-net
+docker volume create hms-db-data
+
+docker run -d --name hms-db --network hms-net -e MYSQL_ROOT_PASSWORD=Root123 -e MYSQL_DATABASE=hms -e MYSQL_USER=hmsuser -e MYSQL_PASSWORD=Hms123 -v hms-db-data:/var/lib/mysql --restart unless-stopped mysql:8.0
+
+# FILE: Dockerfile
+# Build the HMS project first with Maven.
+FROM tomcat:9.0
+COPY target/*.war /usr/local/tomcat/webapps/hms.war
+EXPOSE 8080
+
+# Run these commands in the project directory:
+git clone https://github.com/ssvkotamraju/HMS.git
+cd HMS
+mvn clean package
+docker build -t hms-app:v1 .
+docker run -d --name hms-web --network hms-net -p 8080:8080 -e DB_HOST=hms-db -e DB_NAME=hms -e DB_USER=hmsuser -e DB_PASSWORD=Hms123 --restart unless-stopped hms-app:v1
+docker ps
+docker logs hms-web
+# Browser: http://localhost:8080/hms/
+# NOTE: Application DB configuration must read these variables.
+
+# Persistence demonstration
+docker exec hms-db mysql -uhmsuser -pHms123 hms -e "CREATE TABLE IF NOT EXISTS demo (id INT PRIMARY KEY); INSERT IGNORE INTO demo VALUES (1);"
+docker restart hms-db
+docker exec hms-db mysql -uhmsuser -pHms123 hms -e "SELECT * FROM demo;"
+
+# TASK 2: JENKINS
+# Jenkins > Manage Jenkins > Tools
+# Configure JDK and Maven.
+# New Item > Freestyle > Git
+# Repository: https://github.com/ssvkotamraju/HMS.git
+# Build Trigger: GitHub hook trigger or Poll SCM
+# Build: Invoke top-level Maven targets
+# Goals: clean install
+# Post-build: Archive artifacts
+# Pattern: **/target/*.war
+# Build Now > Console Output
+
+# TASK 3: KUBERNETES
+minikube start
+# FILE: hms-k8s.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hms
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hms
+  template:
+    metadata:
+      labels:
+        app: hms
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/hms:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hms-service
+spec:
+  type: NodePort
+  selector:
+    app: hms
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30082
+
+# Run after saving YAML:
+kubectl apply -f hms-k8s.yaml
+kubectl get pods,svc
+minikube service hms-service --url
+kubectl scale deployment hms --replicas=5
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl rollout status deployment/hms
+kubectl set image deployment/hms web=YOUR_DOCKERHUB_USER/hms:v2
+kubectl rollout undo deployment/hms
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name hms-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs hms-nagios
+# Browser: http://localhost:8088/nagios
+# Configure host checks, HTTP, MySQL TCP, CPU, memory and disk.
+docker stop hms-web
+docker start hms-web
+# Observe alert and recovery in Nagios after checks run.
+
+# TASK 5: AWS EC2 + TOMCAT
+# Launch Ubuntu EC2.
+# Security Group: SSH 22 (My IP), Tomcat 8080 (users).
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/ssvkotamraju/HMS.git
+cd HMS
+mvn clean package
+sudo cp target/*.war /var/lib/tomcat9/webapps/hms.war
+sudo systemctl restart tomcat9
+sudo systemctl status tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/hms/
+
+set3
+
+# TASK 1: DOCKER
+docker pull mysql:8.0
+docker pull tomcat:9.0
+docker network create ors-net
+docker volume create ors-db-data
+
+docker run -d --name ors-db --network ors-net -e MYSQL_ROOT_PASSWORD=Root123 -e MYSQL_DATABASE=ors -e MYSQL_USER=orsuser -e MYSQL_PASSWORD=Ors123 -v ors-db-data:/var/lib/mysql --restart unless-stopped mysql:8.0
+
+# FILE: Dockerfile
+FROM tomcat:9.0
+COPY target/*.war /usr/local/tomcat/webapps/ors.war
+EXPOSE 8080
+
+# Commands:
+git clone https://github.com/ssvkotamraju/ORS.git
+cd ORS
+mvn clean package
+docker build -t ors-app:v1 .
+docker run -d --name ors-web --network ors-net -p 8080:8080 -e DB_HOST=ors-db -e DB_NAME=ors -e DB_USER=orsuser -e DB_PASSWORD=Ors123 --restart unless-stopped ors-app:v1
+docker ps
+docker logs ors-web
+# Browser: http://localhost:8080/ors/
+# Configure the application's real DB connection properties.
+
+# TASK 2: JENKINS
+# Jenkins > New Item > Freestyle Project
+# Git repository:
+# https://github.com/ssvkotamraju/ORS.git
+# Configure JDK, Maven and Git plugins.
+# Build Trigger: GitHub hook trigger
+# Maven goals: clean test package
+# Archive: **/target/*.war, **/target/*.jar
+# Build Now and examine Console Output.
+
+# TASK 3: KUBERNETES
+minikube start
+
+# FILE: ors-k8s.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ors
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ors
+  template:
+    metadata:
+      labels:
+        app: ors
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/ors:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ors-service
+spec:
+  type: NodePort
+  selector:
+    app: ors
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30083
+
+# Commands after saving:
+kubectl apply -f ors-k8s.yaml
+kubectl get deployments,pods,svc
+minikube service ors-service --url
+kubectl scale deployment ors --replicas=5
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl get pods
+kubectl set image deployment/ors web=YOUR_DOCKERHUB_USER/ors:v2
+kubectl rollout status deployment/ors
+kubectl rollout undo deployment/ors
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name ors-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs ors-nagios
+# Browser: http://localhost:8088/nagios
+# Configure HTTP, MySQL TCP and system-resource checks.
+docker stop ors-web
+docker start ors-web
+
+# TASK 5: AWS EC2
+# Launch Ubuntu EC2, allow SSH 22 and Tomcat 8080.
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/ssvkotamraju/ORS.git
+cd ORS
+mvn clean test package
+sudo cp target/*.war /var/lib/tomcat9/webapps/ors.war
+sudo systemctl restart tomcat9
+sudo systemctl status tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/ors/
+
+
+
+
+set 4
+
+# TASK 1: WORDPRESS + MYSQL
+# This is independent of the shopping GitHub project.
+docker pull wordpress:latest
+docker pull mysql:8.0
+docker network create shopping-net
+docker volume create shopping-data
+
+docker run -d --name shopping-db --network shopping-net -e MYSQL_ROOT_PASSWORD=Root123 -e MYSQL_DATABASE=shopping -e MYSQL_USER=shopuser -e MYSQL_PASSWORD=Shop123 -v shopping-data:/var/lib/mysql mysql:8.0
+
+docker run -d --name shopping-wordpress --network shopping-net -p 8085:80 -e WORDPRESS_DB_HOST=shopping-db -e WORDPRESS_DB_NAME=shopping -e WORDPRESS_DB_USER=shopuser -e WORDPRESS_DB_PASSWORD=Shop123 wordpress:latest
+
+docker ps
+docker logs shopping-wordpress
+# Browser: http://localhost:8085
+docker restart shopping-db
+docker volume inspect shopping-data
+
+# TASK 2: JENKINS + MAVEN
+git clone https://github.com/nikithamoturi/OnlineShoppingApp.git
+cd OnlineShoppingApp
+mvn clean test package
+# Jenkins > New Item > Freestyle
+# Git URL: https://github.com/nikithamoturi/OnlineShoppingApp.git
+# Build Step: Invoke top-level Maven targets
+# Goals: clean test package
+# Archive artifacts: **/target/*.war
+# Build Now > Console Output
+
+# TASK 3: KUBERNETES
+minikube start
+
+# FILE: shopping.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopping
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shopping
+  template:
+    metadata:
+      labels:
+        app: shopping
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/shopping:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopping-service
+spec:
+  type: NodePort
+  selector:
+    app: shopping
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30084
+
+kubectl apply -f shopping.yaml
+kubectl get pods,svc
+kubectl scale deployment shopping --replicas=5
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl rollout status deployment/shopping
+minikube service shopping-service --url
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name shopping-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs shopping-nagios
+# Browser: http://localhost:8088/nagios
+# Configure HTTP, MySQL TCP, CPU, memory and disk checks.
+docker stop shopping-wordpress
+docker start shopping-wordpress
+
+# TASK 5: AWS EC2
+# Launch Ubuntu EC2 and configure Security Group.
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/nikithamoturi/OnlineShoppingApp.git
+cd OnlineShoppingApp
+mvn clean package
+sudo cp target/*.war /var/lib/tomcat9/webapps/shopping.war
+sudo systemctl restart tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/shopping/
+
+
+
+
+
+
+
+set5
+
+# TASK 1: DOCKER - WORDPRESS + MYSQL
+# Standalone WordPress exercise.
+docker pull mysql:8.0
+docker pull wordpress:latest
+docker network create gym-net
+docker volume create gym-db-data
+
+docker run -d --name gym-db --network gym-net -e MYSQL_ROOT_PASSWORD=Root123 -e MYSQL_DATABASE=gym -e MYSQL_USER=gymuser -e MYSQL_PASSWORD=Gym123 -v gym-db-data:/var/lib/mysql mysql:8.0
+
+docker run -d --name gym-wordpress --network gym-net -p 8086:80 -e WORDPRESS_DB_HOST=gym-db -e WORDPRESS_DB_USER=gymuser -e WORDPRESS_DB_PASSWORD=Gym123 -e WORDPRESS_DB_NAME=gym wordpress:latest
+
+docker ps
+docker logs gym-wordpress
+# Browser: http://localhost:8086
+docker restart gym-db
+docker volume inspect gym-db-data
+
+# TASK 2: JENKINS
+git clone https://github.com/nikithamoturi/GymManagementSystem.git
+cd GymManagementSystem
+mvn clean test package
+# Jenkins > New Item > Freestyle
+# Git URL: https://github.com/nikithamoturi/GymManagementSystem.git
+# Maven goals: clean test package
+# Archive: **/target/*.war
+# Build Now > Console Output
+
+# TASK 3: KUBERNETES
+minikube start
+
+# FILE: gym.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gym
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gym
+  template:
+    metadata:
+      labels:
+        app: gym
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/gym:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gym-service
+spec:
+  type: NodePort
+  selector:
+    app: gym
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30085
+
+kubectl apply -f gym.yaml
+kubectl get pods,svc
+kubectl scale deployment gym --replicas=5
+kubectl get deployments
+kubectl delete pod POD_NAME
+kubectl get pods
+minikube service gym-service --url
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name gym-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs gym-nagios
+# Configure host, HTTP, MySQL TCP, CPU, disk and memory checks.
+# Browser: http://localhost:8088/nagios
+docker stop gym-wordpress
+docker start gym-wordpress
+
+# TASK 5: AWS
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/nikithamoturi/GymManagementSystem.git
+cd GymManagementSystem
+mvn clean package
+sudo cp target/*.war /var/lib/tomcat9/webapps/gym.war
+sudo systemctl restart tomcat9
+sudo systemctl status tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/gym/
+
+
+
+
+set 6
+
+# TASK 1: DOCKER - WORDPRESS + MYSQL
+# Standalone WordPress exercise.
+docker pull mysql:8.0
+docker pull wordpress:latest
+docker network create rental-net
+docker volume create rental-data
+
+docker run -d --name rental-db --network rental-net -e MYSQL_ROOT_PASSWORD=Root123 -e MYSQL_DATABASE=rental -e MYSQL_USER=rentaluser -e MYSQL_PASSWORD=Rental123 -v rental-data:/var/lib/mysql mysql:8.0
+
+docker run -d --name rental-wordpress --network rental-net -p 8087:80 -e WORDPRESS_DB_HOST=rental-db -e WORDPRESS_DB_NAME=rental -e WORDPRESS_DB_USER=rentaluser -e WORDPRESS_DB_PASSWORD=Rental123 wordpress:latest
+
+docker ps
+docker logs rental-wordpress
+# Browser: http://localhost:8087
+docker restart rental-db
+docker volume inspect rental-data
+
+# TASK 2: JENKINS
+git clone https://github.com/nikithamoturi/VehicleRentalManagementSystem.git
+cd VehicleRentalManagementSystem
+mvn clean test package
+# Jenkins > New Item > Freestyle
+# Git repository: URL above
+# Maven goals: clean test package
+# Archive artifacts: **/target/*.war
+# Build Now > Console Output
+
+# TASK 3: KUBERNETES
+minikube start
+
+# FILE: rental.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rental
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rental
+  template:
+    metadata:
+      labels:
+        app: rental
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/rental:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rental-service
+spec:
+  type: NodePort
+  selector:
+    app: rental
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30086
+
+kubectl apply -f rental.yaml
+kubectl get deployments,pods,svc
+kubectl scale deployment rental --replicas=4
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl get pods
+kubectl rollout status deployment/rental
+minikube service rental-service --url
+kubectl set image deployment/rental web=YOUR_DOCKERHUB_USER/rental:v2
+kubectl rollout undo deployment/rental
+
+# TASK 4: NAGIOS
+docker pull jasonrivers/nagios:latest
+docker run -d --name rental-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs rental-nagios
+# Browser: http://localhost:8088/nagios
+# Configure HTTP, MySQL TCP and resource monitoring.
+docker stop rental-wordpress
+docker start rental-wordpress
+
+# TASK 5: AWS
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/nikithamoturi/VehicleRentalManagementSystem.git
+cd VehicleRentalManagementSystem
+mvn clean package
+sudo cp target/*.war /var/lib/tomcat9/webapps/rental.war
+sudo systemctl restart tomcat9
+sudo systemctl status tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/rental/
+
+
+
+
+set 7
+
+# TASK 1: JENKINS SCRIPTED PIPELINE
+# Clone:
+git clone https://github.com/sarasrija/SportSystem.git
+cd SportSystem
+mvn clean install
+
+# FILE: Jenkinsfile
+# Configure Maven tool named Maven3 in Jenkins first.
+node {
+    stage('Checkout') {
+        git branch: 'main',
+            url: 'https://github.com/sarasrija/SportSystem.git'
+    }
+    stage('Build') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn clean compile'
+            } else {
+                bat 'mvn clean compile'
+            }
+        }
+    }
+    stage('Test') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn test'
+            } else {
+                bat 'mvn test'
+            }
+        }
+    }
+    stage('Package') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn package -DskipTests'
+            } else {
+                bat 'mvn package -DskipTests'
+            }
+        }
+        archiveArtifacts artifacts: '**/target/*.war,**/target/*.jar',
+                         allowEmptyArchive: false
+    }
+}
+
+# Jenkins > New Item > Pipeline
+# Paste Jenkinsfile into Pipeline Script.
+# Configure GitHub webhook or Poll SCM.
+# Build Now > Console Output.
+
+# TASK 2: AWS EC2 + TOMCAT
+# Launch Ubuntu EC2, allow SSH 22 and Tomcat 8080.
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y git maven openjdk-17-jdk tomcat9
+git clone https://github.com/sarasrija/SportSystem.git
+cd SportSystem
+mvn clean package
+sudo cp target/*.war /var/lib/tomcat9/webapps/sports.war
+sudo systemctl restart tomcat9
+sudo systemctl status tomcat9
+# Browser: http://EC2_PUBLIC_IP:8080/sports/
+
+# TASK 3: KUBERNETES + NAGIOS
+minikube start
+
+# FILE: sports.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sports
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sports
+  template:
+    metadata:
+      labels:
+        app: sports
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/sports:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sports-service
+spec:
+  type: NodePort
+  selector:
+    app: sports
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30087
+
+kubectl apply -f sports.yaml
+kubectl get pods,svc
+kubectl scale deployment sports --replicas=4
+kubectl get pods
+kubectl describe pod POD_NAME
+kubectl logs POD_NAME
+kubectl rollout undo deployment/sports
+minikube service sports-service --url
+
+docker pull jasonrivers/nagios:latest
+docker run -d --name sports-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker logs sports-nagios
+# Configure Nagios host and service monitoring.
+# Browser: http://localhost:8088/nagios
+
+# TASK 4: DOCKER COMPOSE
+# Create directory and three files:
+mkdir sports-compose
+cd sports-compose
+
+# FILE: docker-compose.yml
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://sports:Sports123@db:5432/sportsdb
+      REDIS_HOST: redis
+    depends_on:
+      - db
+      - redis
+    networks:
+      - sports-net
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: sportsdb
+      POSTGRES_USER: sports
+      POSTGRES_PASSWORD: Sports123
+    volumes:
+      - sports-data:/var/lib/postgresql/data
+    networks:
+      - sports-net
+  redis:
+    image: redis:7
+    networks:
+      - sports-net
+networks:
+  sports-net:
+volumes:
+  sports-data:
+
+# FILE: Dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+EXPOSE 5000
+CMD ["python", "app.py"]
+
+# FILE: requirements.txt
+flask
+psycopg2-binary
+redis
+
+# FILE: app.py
+from flask import Flask
+import os
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Sports Flask Service Running"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+# Commands after saving all files:
+docker compose up -d --build
+docker compose ps
+docker compose logs web
+docker compose exec db pg_isready -U sports
+docker compose exec redis redis-cli ping
+# Browser: http://localhost:5000
+docker compose down
+docker compose up -d
+docker volume ls
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+set 8
+# TASK 1: JENKINS SCRIPTED PIPELINE
+git clone https://github.com/sarasrija/BloodBanksystem.git
+cd BloodBanksystem
+mvn clean install
+
+# FILE: Jenkinsfile
+# Configure Maven tool named Maven3 in Jenkins.
+node {
+    try {
+        stage('Checkout') {
+            git branch: 'main',
+                url: 'https://github.com/sarasrija/BloodBanksystem.git'
+        }
+        stage('Clean') {
+            if (isUnix()) {
+                sh 'mvn clean'
+            } else {
+                bat 'mvn clean'
+            }
+        }
+        stage('Install') {
+            if (isUnix()) {
+                sh 'mvn install'
+            } else {
+                bat 'mvn install'
+            }
+        }
+        stage('Test') {
+            if (isUnix()) {
+                sh 'mvn test'
+            } else {
+                bat 'mvn test'
+            }
+        }
+        stage('Package') {
+            if (isUnix()) {
+                sh 'mvn package'
+            } else {
+                bat 'mvn package'
+            }
+            archiveArtifacts artifacts: '**/target/*.war,**/target/*.jar'
+        }
+    } catch (err) {
+        currentBuild.result = 'FAILURE'
+        throw err
+    }
+}
+
+# Jenkins > New Item > Pipeline
+# Paste script and configure JDK/Maven.
+# Configure build trigger.
+# Build Now > Console Output.
+
+# TASK 2: AWS EC2 - STATIC WEBSITE
+# Launch Ubuntu EC2.
+# Allow HTTP 80 and SSH 22 (restricted).
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+sudo apt update
+sudo apt install -y nginx git
+sudo systemctl enable --now nginx
+
+# FILE: index.html
+<!DOCTYPE html>
+<html>
+<head><title>Blood Bank</title></head>
+<body>
+<h1>Blood Bank Management Portal</h1>
+<p>Web Server Running Successfully</p>
+</body>
+</html>
+
+# Save the HTML in /var/www/html/index.html
+sudo nano /var/www/html/index.html
+sudo nginx -t
+sudo systemctl restart nginx
+curl http://localhost
+# Browser: http://EC2_PUBLIC_IP
+
+# TASK 3: KUBERNETES + NAGIOS
+minikube start
+kubectl create deployment bloodbank --image=nginx:stable --replicas=2
+kubectl expose deployment bloodbank --type=NodePort --port=80
+kubectl get deployments,pods,svc
+kubectl scale deployment bloodbank --replicas=4
+kubectl get pods
+kubectl describe pod POD_NAME
+kubectl logs POD_NAME
+kubectl rollout undo deployment/bloodbank
+minikube service bloodbank --url
+
+docker pull jasonrivers/nagios:latest
+docker run -d --name blood-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker ps
+docker logs blood-nagios
+# Browser: http://localhost:8088/nagios
+# Add host/service checks in Nagios configuration.
+
+# TASK 4: DOCKER COMPOSE
+mkdir blood-compose
+cd blood-compose
+
+# FILE: docker-compose.yml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8085:80"
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    depends_on:
+      - db
+    networks:
+      - blood-net
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: bloodbank
+      POSTGRES_USER: blooduser
+      POSTGRES_PASSWORD: Blood123
+    volumes:
+      - blood-data:/var/lib/postgresql/data
+    networks:
+      - blood-net
+networks:
+  blood-net:
+volumes:
+  blood-data:
+
+# FILE: html/index.html
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Blood Bank Portal</h1>
+<p>Docker Compose Deployment Successful</p>
+</body>
+</html>
+
+# Commands:
+# Create the html folder and save index.html in it.
+docker compose up -d
+docker compose ps
+docker compose logs
+docker compose exec db pg_isready -U blooduser
+# Browser: http://localhost:8085
+docker compose stop
+docker compose start
+docker compose down
+docker compose up -d
+docker volume ls
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+set9
+
+# TASK 1: JENKINS + GITHUB WEBHOOK + NGROK
+
+# Clone project:
+git clone https://github.com/sarasrija/ApartmentSystem.git
+cd ApartmentSystem
+mvn clean package
+
+# FILE: Jenkinsfile
+# Configure Maven3 in Jenkins > Manage Jenkins > Tools.
+node {
+    stage('Checkout') {
+        git branch: 'main',
+            url: 'https://github.com/sarasrija/ApartmentSystem.git'
+    }
+    stage('Build') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn clean compile'
+            } else {
+                bat 'mvn clean compile'
+            }
+        }
+    }
+    stage('Test') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn test'
+            } else {
+                bat 'mvn test'
+            }
+        }
+    }
+    stage('Package') {
+        def mvnHome = tool 'Maven3'
+        withEnv(["PATH+MAVEN=${mvnHome}/bin"]) {
+            if (isUnix()) {
+                sh 'mvn package -DskipTests'
+            } else {
+                bat 'mvn package -DskipTests'
+            }
+        }
+        archiveArtifacts artifacts: '**/target/*.war',
+                         allowEmptyArchive: false
+    }
+}
+
+# Jenkins configuration:
+# New Item > Pipeline > Pipeline Script
+# Paste Jenkinsfile.
+# Build Triggers > GitHub hook trigger for GITScm polling
+# Install Pipeline Stage View plugin if needed.
+# Build Now > Console Output.
+
+# Install ngrok and authenticate:
+ngrok config add-authtoken YOUR_NGROK_TOKEN
+
+# Forward Jenkins port (change if Jenkins uses 8081):
+ngrok http 8080
+
+# Copy HTTPS forwarding URL.
+# GitHub > Repository > Settings > Webhooks > Add webhook
+# Payload URL:
+# https://YOUR_NGROK_DOMAIN/github-webhook/
+# Content type: application/json
+# Event: Just the push event
+# Save webhook and test with a new push.
+# Keep ngrok running.
+
+# TASK 2: AWS EC2 + DOCKER + TOMCAT
+
+# AWS Console:
+# Launch Ubuntu EC2, choose key pair.
+# Security Group: SSH 22 from My IP,
+# application host port 8090 from intended users.
+
+ssh -i YOUR_KEY.pem ubuntu@EC2_PUBLIC_IP
+
+sudo apt update
+sudo apt install -y git docker.io maven openjdk-17-jdk
+sudo systemctl enable --now docker
+
+git clone https://github.com/sarasrija/ApartmentSystem.git
+cd ApartmentSystem
+mvn clean package
+
+# FILE: Dockerfile
+FROM tomcat:9.0
+COPY target/*.war /usr/local/tomcat/webapps/apartment.war
+EXPOSE 8080
+
+# Commands after saving Dockerfile:
+sudo docker build -t apartment-app:v1 .
+sudo docker run -d --name apartment-app -p 8090:8080 --restart unless-stopped apartment-app:v1
+sudo docker ps
+sudo docker logs apartment-app
+
+# Browser:
+# http://EC2_PUBLIC_IP:8090/apartment/
+
+# TASK 3: KUBERNETES + NAGIOS
+
+minikube start
+
+# FILE: apartment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apartment
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: apartment
+  template:
+    metadata:
+      labels:
+        app: apartment
+    spec:
+      containers:
+        - name: web
+          image: YOUR_DOCKERHUB_USER/apartment:v1
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apartment-service
+spec:
+  type: NodePort
+  selector:
+    app: apartment
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30089
+
+# Commands after saving YAML:
+kubectl apply -f apartment.yaml
+kubectl get deployments
+kubectl get pods
+kubectl get svc
+kubectl scale deployment apartment --replicas=6
+kubectl get pods
+kubectl delete pod POD_NAME
+kubectl get pods
+minikube service apartment-service --url
+
+# Alternative access:
+kubectl port-forward service/apartment-service 8091:8080
+# Browser: http://localhost:8091/apartment/
+
+# Nagios:
+docker pull jasonrivers/nagios:latest
+docker run -d --name apartment-nagios -p 8088:80 --restart unless-stopped jasonrivers/nagios:latest
+docker ps
+docker logs apartment-nagios
+# Browser: http://localhost:8088/nagios
+# Configure CPU, memory, disk, uptime and HTTP checks.
+
+# TASK 4: DOCKER COMPOSE
+
+mkdir compose-lab
+cd compose-lab
+
+# FILE: docker-compose.yml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8085:80"
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    depends_on:
+      - db
+    networks:
+      - apartment-net
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: apartmentdb
+      POSTGRES_USER: apartmentuser
+      POSTGRES_PASSWORD: Apartment123
+    volumes:
+      - apartment-data:/var/lib/postgresql/data
+    networks:
+      - apartment-net
+networks:
+  apartment-net:
+volumes:
+  apartment-data:
+
+# FILE: html/index.html
+<!DOCTYPE html>
+<html>
+<head>
+<title>Apartment Management</title>
+</head>
+<body>
+<h1>Apartment Management Portal</h1>
+<p>Docker Compose Application Running</p>
+</body>
+</html>
+
+# Commands after creating the files:
+docker compose config
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs
+docker compose exec db pg_isready -U apartmentuser
+# Browser: http://localhost:8085
+
+# Stop and restart:
+docker compose stop
+docker compose start
+
+# Rebuild if a custom build is configured:
+docker compose up -d --build
+
+# Remove containers without deleting database volume:
+docker compose down
+docker compose up -d
+
+# Check persistence:
+docker volume ls
+
+
+
