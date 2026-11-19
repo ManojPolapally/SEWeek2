@@ -1,0 +1,693 @@
+//NAGIOS
+:: STEP 1: PULL NAGIOS IMAGE
+docker pull jasonrivers/nagios:latest
+
+:: STEP 2: CREATE DOCKER NETWORK
+docker network create monitoring-net
+
+:: STEP 3: RUN NAGIOS
+docker run -d --name nagiosdemo --network monitoring-net -p 8888:80 jasonrivers/nagios:latest
+
+:: STEP 4: CHECK CONTAINERS
+docker ps
+
+:: STEP 5: RUN NGINX WEB SERVER
+docker run -d --name webdemo --network monitoring-net -p 8082:80 nginx:alpine
+
+:: STEP 6: RUN MYSQL DATABASE
+docker run -d --name mysqldemo --network monitoring-net -e MYSQL_ROOT_PASSWORD=ExamRoot123 -e MYSQL_DATABASE=ecommerce mysql:8.0
+
+:: STEP 7: CHECK MYSQL LOGS
+docker logs mysqldemo
+
+:: STEP 8: COPY NAGIOS CONFIGURATION
+docker cp exam-monitoring.cfg nagiosdemo:/opt/nagios/etc/objects/exam-monitoring.cfg
+
+:: STEP 9: REGISTER CONFIGURATION
+docker exec nagiosdemo sh -c "echo cfg_file=/opt/nagios/etc/objects/exam-monitoring.cfg >> /opt/nagios/etc/nagios.cfg"
+
+:: STEP 10: VALIDATE CONFIGURATION
+docker exec nagiosdemo /opt/nagios/bin/nagios -v /opt/nagios/etc/nagios.cfg
+
+:: STEP 11: RESTART NAGIOS
+docker restart nagiosdemo
+
+:: STEP 12: CHECK MONITORING PLUGINS
+docker exec nagiosdemo ls /opt/nagios/libexec
+
+:: STEP 13: SIMULATE HTTP FAILURE
+docker stop webdemo
+
+:: STEP 14: RESTORE HTTP SERVICE
+docker start webdemo
+
+:: STEP 15: SIMULATE DATABASE FAILURE
+docker stop mysqldemo
+
+:: STEP 16: RESTORE DATABASE
+docker start mysqldemo
+
+:: STEP 17: VERIFY CONTAINERS
+docker ps
+
+
+//KUBERNETES
+:: STEP 1: START MINIKUBE CLUSTER
+minikube start --driver=docker
+
+:: CHECK MINIKUBE STATUS
+minikube status
+
+:: CHECK CLUSTER
+minikube kubectl -- get nodes
+
+:: STEP 2: CREATE NGINX DEPLOYMENT
+minikube kubectl -- create deployment mynginx --image=nginx
+
+:: SCALE TO 2 REPLICAS
+minikube kubectl -- scale deployment mynginx --replicas=2
+
+:: VERIFY DEPLOYMENT
+minikube kubectl -- get deployments
+minikube kubectl -- get pods
+
+:: STEP 3: EXPOSE APPLICATION USING SERVICE
+minikube kubectl -- expose deployment mynginx --type=NodePort --port=80 --target-port=80
+
+:: VERIFY SERVICE
+minikube kubectl -- get services
+
+:: OPEN NGINX WEBSITE
+minikube service mynginx --url
+
+:: ALTERNATIVE: ACCESS WEBSITE ON PORT 8081
+:: Run in a separate CMD window
+minikube kubectl -- port-forward svc/mynginx 8081:80
+
+:: STEP 4: SCALE FROM 2 TO 5 REPLICAS
+minikube kubectl -- scale deployment mynginx --replicas=5
+
+:: VERIFY 5 PODS
+minikube kubectl -- get deployments
+minikube kubectl -- get pods
+
+:: STEP 5: AUTOMATIC POD RECREATION
+:: GET ACTUAL POD NAMES
+minikube kubectl -- get pods
+
+:: DELETE ONE POD (REPLACE PLACEHOLDER)
+minikube kubectl -- delete pod YOUR_ACTUAL_POD_NAME
+
+:: VERIFY AUTOMATIC POD RECREATION
+minikube kubectl -- get pods
+minikube kubectl -- get deployments
+
+:: STEP 6: ROLLING UPDATE
+minikube kubectl -- set image deployment/mynginx nginx=nginx:1.27
+
+:: CHECK ROLLING UPDATE STATUS
+minikube kubectl -- rollout status deployment/mynginx
+
+:: CHECK ROLLOUT HISTORY
+minikube kubectl -- rollout history deployment/mynginx
+
+:: PERFORM ROLLBACK
+minikube kubectl -- rollout undo deployment/mynginx
+
+:: VERIFY ROLLBACK
+minikube kubectl -- rollout status deployment/mynginx
+
+:: OPEN KUBERNETES DASHBOARD
+minikube dashboard
+
+:: OPTIONAL CLEANUP (AFTER EXAM)
+minikube kubectl -- delete deployment mynginx
+minikube kubectl -- delete service mynginx
+minikube stop
+       
+
+
+
+
+
+
+
+# ==========================================================
+# TASK 1: CREATE PROJECT DIRECTORY
+# ==========================================================
+
+mkdir ecommerce-docker
+cd ecommerce-docker
+
+# ==========================================================
+# TASK 2: PULL MYSQL AND WORDPRESS IMAGES
+# ==========================================================
+
+docker pull mysql:8.0
+docker pull wordpress:php8.3-apache
+
+# Verify images
+docker images
+
+# ==========================================================
+# TASK 3: CREATE DOCKER COMPOSE FILE
+# ==========================================================
+
+# Create docker-compose.yml
+notepad docker-compose.yml
+
+# Paste the following YAML into Notepad and save the file.
+# IMPORTANT: Copy only the YAML section below into the file.
+
+# ----------------------------------------------------------
+# START OF docker-compose.yml
+# ----------------------------------------------------------
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: ecommerce-mysql
+    restart: always
+
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: ecommerce
+      MYSQL_USER: ecommerceuser
+      MYSQL_PASSWORD: ecommerce123
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    networks:
+      - ecommerce-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  wordpress:
+    image: wordpress:php8.3-apache
+    container_name: ecommerce-wordpress
+    restart: always
+
+    ports:
+      - "8085:80"
+
+    environment:
+      WORDPRESS_DB_HOST: mysql:3306
+      WORDPRESS_DB_USER: ecommerceuser
+      WORDPRESS_DB_PASSWORD: ecommerce123
+      WORDPRESS_DB_NAME: ecommerce
+
+    volumes:
+      - wordpress_data:/var/www/html
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+    networks:
+      - ecommerce-network
+
+volumes:
+  mysql_data:
+  wordpress_data:
+
+networks:
+  ecommerce-network:
+    driver: bridge
+
+# ----------------------------------------------------------
+# END OF docker-compose.yml
+# ----------------------------------------------------------
+
+# ==========================================================
+# TASK 4: VALIDATE DOCKER COMPOSE FILE
+# ==========================================================
+
+# Run after saving and closing Notepad
+docker compose config
+
+# ==========================================================
+# TASK 5: CREATE NETWORK AND START BOTH CONTAINERS
+# ==========================================================
+
+# Docker Compose automatically creates the custom network
+# and persistent volumes defined in the YAML file.
+
+docker compose up -d
+
+# Check running containers
+docker compose ps
+
+# Check Docker networks
+docker network ls
+
+# Check Docker volumes
+docker volume ls
+
+# ==========================================================
+# TASK 6: VERIFY MYSQL DATABASE CONNECTIVITY
+# ==========================================================
+
+# Check MySQL logs
+docker logs ecommerce-mysql
+
+# Check WordPress logs
+docker logs ecommerce-wordpress
+
+# Connect to MySQL
+docker exec -it ecommerce-mysql mysql -u ecommerceuser -pecommerce123 ecommerce
+
+# Inside MySQL, execute:
+SHOW DATABASES;
+USE ecommerce;
+SHOW TABLES;
+EXIT;
+
+# Test WordPress-to-MySQL network connectivity
+docker exec ecommerce-wordpress php -r 'try {$db = new PDO("mysql:host=mysql;dbname=ecommerce", "ecommerceuser", "ecommerce123"); echo "Database Connected Successfully\n";} catch (Exception $e) {echo $e->getMessage()."\n"; exit(1);}'
+
+# ==========================================================
+# TASK 7: VERIFY PERSISTENT VOLUMES
+# ==========================================================
+
+docker volume ls
+
+# Inspect MySQL volume
+docker volume inspect ecommerce-docker_mysql_data
+
+# Inspect WordPress volume
+docker volume inspect ecommerce-docker_wordpress_data
+
+# Note: Volume names use the Compose project name.
+# If your folder has a different name, adjust accordingly.
+
+# ==========================================================
+# TASK 8: ACCESS WORDPRESS APPLICATION
+# ==========================================================
+
+# Open browser manually:
+# http://localhost:8085
+
+# Or open from PowerShell:
+Start-Process "http://localhost:8085"
+
+# Complete WordPress installation in browser:
+# 1. Select English
+# 2. Enter Site Title: University E-Commerce
+# 3. Enter Admin Username
+# 4. Enter Admin Password
+# 5. Enter Email
+# 6. Click Install WordPress
+# 7. Login to WordPress dashboard
+
+# ==========================================================
+# TASK 9: DEMONSTRATE CONTAINER RECOVERY
+# ==========================================================
+
+# Check running containers
+docker compose ps
+
+# Stop WordPress container
+docker stop ecommerce-wordpress
+
+# Start it again using Compose
+docker compose up -d
+
+# Verify recovery
+docker compose ps
+
+# Restart both containers
+docker compose restart
+
+# Check status
+docker compose ps
+
+# ==========================================================
+# TASK 10: DEMONSTRATE DATA PERSISTENCE
+# ==========================================================
+
+# First, create a WordPress post in the browser:
+# Dashboard -> Posts -> Add New
+# Title: Product Test
+# Click Publish
+
+# Remove both containers while preserving volumes
+docker compose down
+
+# Verify containers are removed
+docker ps -a
+
+# Verify volumes still exist
+docker volume ls
+
+# Recreate containers
+docker compose up -d
+
+# Check running containers
+docker compose ps
+
+# Open WordPress again
+Start-Process "http://localhost:8085"
+
+# Verify the Product Test post still exists.
+# This demonstrates persistent data storage.
+
+# ==========================================================
+# TASK 11: VERIFY PORT MAPPING
+# ==========================================================
+
+docker port ecommerce-wordpress
+
+# Expected:
+# 80/tcp -> 0.0.0.0:8085
+
+# ==========================================================
+# TASK 12: FINAL VERIFICATION
+# ==========================================================
+
+docker compose ps
+docker network ls
+docker volume ls
+docker compose logs --tail=20
+
+# ==========================================================
+# OPTIONAL: INSTALL WOOCOMMERCE
+# ==========================================================
+
+# To convert WordPress into an E-Commerce Management System:
+# 1. Open WordPress Dashboard
+# 2. Go to Plugins -> Add New Plugin
+# 3. Search WooCommerce
+# 4. Click Install Now
+# 5. Click Activate
+# 6. Complete store setup
+# 7. Add products, customers and test orders
+
+# ==========================================================
+# IMPORTANT: CLEANUP COMMANDS
+# ==========================================================
+
+# Stop and remove containers without deleting data
+# docker compose down
+
+# WARNING: This deletes persistent data volumes!
+# docker compose down -v
+
+# ==========================================================
+# END OF DOCKER COMPOSE PRACTICAL
+# ==========================================================
+  
+
+# ============================================================
+# TASK 1: CREATE AWS EC2 INSTANCE
+# ============================================================
+
+# 1. Login to AWS Console
+# 2. Go to EC2 -> Launch Instance
+# 3. Name: Ubuntu-Web-Server
+# 4. AMI: Ubuntu Server
+# 5. Architecture: 64-bit
+# 6. Instance Type: t2.micro (if eligible)
+# 7. Create Key Pair: labuser.pem
+# 8. Network Settings:
+#    Allow SSH (22) from your IP
+#    Allow HTTP (80)
+#    Allow HTTPS (443)
+#    Add Custom TCP port 6060 from your IP
+# 9. Storage: 8 GB or more
+# 10. Click Launch Instance
+
+# ============================================================
+# TASK 2: CONNECT TO EC2 USING SSH
+# ============================================================
+
+# Run these commands in your LOCAL PowerShell terminal.
+
+# Navigate to the folder containing your .pem file
+cd "C:\Users\YourName\Downloads"
+
+# Replace with your actual EC2 public DNS
+ssh -i "labuser.pem" ubuntu@YOUR_EC2_PUBLIC_DNS
+
+# After connecting, run the remaining commands in Ubuntu.
+
+# ============================================================
+# TASK 3: UPDATE UBUNTU AND INSTALL SOFTWARE
+# ============================================================
+
+sudo apt update
+
+sudo apt install -y docker.io
+
+sudo apt install -y git
+
+sudo apt install -y nano
+
+sudo apt install -y maven
+
+# Start Docker
+sudo systemctl start docker
+
+# Enable Docker
+sudo systemctl enable docker
+
+# Check versions
+sudo docker --version
+git --version
+mvn -version
+
+# ============================================================
+# TASK 4: CLONE MAVEN WEB APPLICATION FROM GITHUB
+# ============================================================
+
+# Example GitHub repository:
+git clone https://github.com/kvrajanirajesh/mid2-hospitalmaven.git
+
+# Enter project folder
+cd mid2-hospitalmaven
+
+# Check project files
+ls
+
+# Check pom.xml
+cat pom.xml
+
+# ============================================================
+# TASK 5: BUILD MAVEN WEB APPLICATION
+# ============================================================
+
+# Compile, test and package
+mvn clean package
+
+# Check generated artifacts
+ls target/
+
+# IMPORTANT:
+# A WAR file is required for the Tomcat Dockerfile below.
+# If Maven produces only a JAR, use a WAR-packaged
+# Maven web project instead.
+
+# ============================================================
+# TASK 6: CREATE DOCKERFILE
+# ============================================================
+
+nano Dockerfile
+
+# Paste the following content into Dockerfile:
+
+# ---------- START OF Dockerfile ----------
+
+FROM tomcat:9-jdk11
+
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+EXPOSE 8080
+
+CMD ["catalina.sh", "run"]
+
+# ---------- END OF Dockerfile ----------
+
+# Save Dockerfile in nano:
+# CTRL + O
+# ENTER
+# CTRL + X
+
+# Note:
+# Use a Java/Tomcat version compatible with your application.
+# This example assumes a WAR compatible with Tomcat 9.
+
+# ============================================================
+# TASK 7: BUILD DOCKER IMAGE
+# ============================================================
+
+sudo docker build -t mywebapp .
+
+# Check Docker images
+sudo docker images
+
+# ============================================================
+# TASK 8: RUN DOCKER CONTAINER
+# ============================================================
+
+sudo docker run -d \
+  --name app-demo \
+  --restart unless-stopped \
+  -p 6060:8080 \
+  mywebapp
+
+# ============================================================
+# TASK 9: CHECK CONTAINER STATUS
+# ============================================================
+
+sudo docker ps
+
+# Check all containers
+sudo docker ps -a
+
+# Check application logs
+sudo docker logs app-demo
+
+# Check port mapping
+sudo docker port app-demo
+
+# ============================================================
+# TASK 10: TEST APPLICATION ON EC2
+# ============================================================
+
+# Test from Ubuntu terminal
+curl http://localhost:6060
+
+# If curl is unavailable:
+sudo apt install -y curl
+
+# Then test again:
+curl http://localhost:6060
+
+# ============================================================
+# TASK 11: ACCESS APPLICATION PUBLICLY
+# ============================================================
+
+# Go to AWS Console -> EC2 -> Instances
+# Select your instance.
+# Copy Public IPv4 Address.
+
+# Open this URL in your laptop browser:
+#
+# http://YOUR_EC2_PUBLIC_IP:6060
+#
+# Example format:
+# http://12.34.56.78:6060
+#
+# Replace the example IP with your actual public IP.
+
+# ============================================================
+# TASK 12: FIX WEBSITE NOT OPENING
+# ============================================================
+
+# AWS Console:
+# EC2 -> Instances -> Select Instance
+# Security -> Security Groups -> Edit Inbound Rules
+#
+# Add:
+# Type: Custom TCP
+# Port: 6060
+# Source: My IP
+#
+# Save Rules
+
+# Check Docker status
+sudo systemctl status docker
+
+# Check container
+sudo docker ps
+
+# Check errors
+sudo docker logs app-demo
+
+# Restart container if needed
+sudo docker restart app-demo
+
+# Check again
+sudo docker ps
+
+# ============================================================
+# TASK 13: DEMONSTRATE STOP AND RESTART
+# ============================================================
+
+# Stop container
+sudo docker stop app-demo
+
+# Verify stopped state
+sudo docker ps -a
+
+# Start container
+sudo docker start app-demo
+
+# Verify running state
+sudo docker ps
+
+# ============================================================
+# TASK 14: REBUILD APPLICATION AFTER CODE CHANGES
+# ============================================================
+
+# Update source code
+git pull
+
+# Build WAR again
+mvn clean package
+
+# Stop old container
+sudo docker stop app-demo
+
+# Remove old container
+sudo docker rm app-demo
+
+# Rebuild image
+sudo docker build -t mywebapp .
+
+# Start new container
+sudo docker run -d \
+  --name app-demo \
+  --restart unless-stopped \
+  -p 6060:8080 \
+  mywebapp
+
+# ============================================================
+# TASK 15: FINAL VERIFICATION
+# ============================================================
+
+sudo docker images
+
+sudo docker ps
+
+sudo docker logs --tail 20 app-demo
+
+curl http://localhost:6060
+
+# FINAL WEBSITE:
+# http://YOUR_EC2_PUBLIC_IP:6060
+
+# ============================================================
+# EXPECTED OUTPUT
+# ============================================================
+
+# 1. Ubuntu EC2 instance created successfully
+# 2. SSH connection established
+# 3. Docker, Git, Nano and Maven installed
+# 4. GitHub repository cloned
+# 5. Maven WAR artifact generated
+# 6. Dockerfile created
+# 7. Docker image built successfully
+# 8. Docker container running on port 6060
+# 9. Website accessible using EC2 Public IP
+# 10. Container restart demonstrated
+
+# ============================================================
+# END OF AWS CLOUD DEPLOYMENT PRACTICAL
+# ============================================================
